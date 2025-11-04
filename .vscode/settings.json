@@ -2,7 +2,7 @@
     "python.testing.unittestArgs": [
         "-v",
         "-s",
-        "./ncd_io_proxr",
+        ".",
         "-p",
         "*test*.py"
     ],
