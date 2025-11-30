@@ -1,7 +1,7 @@
 import socket
 from unittest import TestCase, mock
 
-from ncd_io.proxr import RelayController
+from ncd_io.proxr import RelayController, Bank, Port
 
 
 class TestRelayController(TestCase):
@@ -22,11 +22,11 @@ class TestRelayController(TestCase):
 
     def test_validate_response_valid(self):
         response = b"\x55"
-        self.assertTrue(self.relay_controller.validate_response(response))
+        self.assertTrue(self.relay_controller.validate_res_success(response))
 
     def test_validate_response_invalid(self):
         response = b"\x00"
-        self.assertFalse(self.relay_controller.validate_response(response))
+        self.assertFalse(self.relay_controller.validate_res_success(response))
 
     def test_control_active_timers(self):
         state = 0xAAAA
@@ -38,6 +38,14 @@ class TestRelayController(TestCase):
         self.mock_socket.send.assert_called_with(expected_command)
         self.mock_socket.recv.assert_called_with(1)
         self.assertEqual(response, True)
+
+    def test_toggle_bank_relays(self):
+        expected_response = b"\x55"
+        expected_command = b"\xfe\x83\x02"
+        self.mock_socket.recv.return_value = expected_response
+
+        self.assertTrue(self.relay_controller.toggle_bank_relays(Bank.BANK_2))
+        self.mock_socket.send.assert_called_with(expected_command)
 
 
 if __name__ == "__main__":

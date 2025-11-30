@@ -3,7 +3,7 @@ import socket
 import sys
 from time import sleep
 
-from ncd_io.proxr import RelayController
+from ncd_io.proxr import RelayController, Bank, Port
 
 # Table commands Working Documentation:
 # | TABLE | BANK | PORT | ON STX  | ON HEX 1 | ON HEX 2 | ON BIN 1 | ON BIN 2 | ON DEC 1 | ON DEC 2 | OFF STX | OFF HEX 1 | OFF HEX 2 | OFF BIN 1 | OFF BIN 2 | OFF DEC 1 | OFF DEC 2 |
@@ -46,30 +46,30 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 # instantiate the board object and pass it the network socket
 
 with RelayController(com=sock) as board1:
-    if sys.argv[1]:
-        print(bin(int.from_bytes(board1.send_command(b"\xfe\x7c\x01", 1))))
-        for table in sys.argv:
-            if table == ".":
-                continue
-            port, bank = table_pattern[int(table)]
-            if board1.turn_on_bank_relay(bank=bank, port=port):
-                print(f"Relay {table} Enabled")
-            else:
-                print(f"Failed to Enable Relay {table}")
-            sleep(10)
-            if board1.turn_off_bank_relay(bank=bank, port=port):
-                print(f"Relay {table} Disabled")
-            else:
-                print(f"Failed to Disable Relay {table}")
+    bank = Bank.BANK_2
+    port = Port.PORT_3
+    board1.quick_start()
+    sleep(1)
+    print(bin(int.from_bytes(board1.send_command(b"\xfe\x71\x02", 1))))
+    sleep(1)
+    print(bin(int.from_bytes(board1.send_command(b"\xfe\x69\x02", 1))))
+    if board1.turn_on_bank_relay(bank, port):
+        print(f"Relay Enabled, {bank} {port}")
     else:
-        print("Dancing through all relays!")
-        for port, bank in table_pattern:
-            if board1.turn_on_bank_relay(bank=bank, port=port):
-                print(f"Relay {port} on Bank {bank} Enabled")
-            else:
-                print(f"Failed to Enable Relay {port} on Bank {bank}")
-            sleep(1)
-            if board1.turn_off_bank_relay(bank=bank, port=port):
-                print(f"Relay {port} on Bank {bank} Disabled")
-            else:
-                print(f"Failed to Disable Relay {port} on Bank {bank}")
+        print(f"Failed to Enable Relay, {bank} {port}")
+    sleep(10)
+    if board1.turn_off_bank_relay(bank, port):
+        print(f"Relay Disabled, {bank} {port}")
+    else:
+        print(f"Failed to Disable Relay, {bank} {port}")
+    # print("Dancing through all relays!")
+    # for port, bank in table_pattern:
+        # if board1.turn_on_bank_relay(bank=Bank(bank), port=Port(port-1)):
+        #     print(f"Relay {port} on Bank {bank} Enabled")
+        # else:
+        #     print(f"Failed to Enable Relay {port} on Bank {bank}")
+        # sleep(1)
+        # if board1.turn_off_bank_relay(bank=Bank(bank), port=Port(port-1)):
+        #     print(f"Relay {port} on Bank {bank} Disabled")
+        # else:
+        #     print(f"Failed to Disable Relay {port} on Bank {bank}")

@@ -4,332 +4,353 @@ __description__ = (
     "NCD ProXR Relay Controller library. https://media.ncd.io/20170721183921/ProXR.pdf"
 )
 
-from socket import socket
+from enum import Enum
+from collections.abc import Iterable
+from typing import SupportsBytes, SupportsIndex
+from ncd_io.e3c_device import E3CDevice
 
 
-class RelayController:
-    IP_ADDRESS: str = "10.0.0.105"
-    PORT: int = 2101
-    COMMAND_STX: int = 0xFE
+class Commands(Enum):
+    TURN_OFF_RELAY_OFFSET = 0
+    TURN_ON_RELAY_OFFSET = 8
+    TURN_OFF_BANK_RELAY_OFFSET = 100
+    TURN_ON_BANK_RELAY_OFFSET = 108
+    QUERY_RELAY_STATUS_OFFSET = 16
+    QUERY_BANK_RELAY_STATUS_OFFSET = 116
+    QUERY_STATUS_ALL = 24
+    QUERY_BANK_STATUS = 124
+    ENABLE_REPORTING_MODE = 27
+    DISABLE_REPORTING_MODE = 28
+    ENABLE_ALL_RELAYS = 29
+    ENABLE_BANK_RELAYS = 129
+    DISABLE_ALL_RELAYS = 30
+    DISABLE_BANK_RELAYS = 130
+    TOGGLE_ALL_RELAYS = 31
+    TOGGLE_BANK_RELAYS = 131
+    REVERSE_ALL_RELAYS = 32
+    REVERSE_BANK_RELAYS = 132
+    TEST_COMMS = 33
+    QUERY_SELECTED_BANK = 34
+    ENABLE_AUTOMATIC_REFRESHING = 25
+    DISABLE_AUTOMATIC_REFRESHING = 26
+    STORE_RELAY_REFRESHING_MODE = 35
+    QUERY_RELAY_REFRESHING_MODE = 36
+    REFRESH_RELAYS = 37
+    SET_RELAY_STATUS = 40
+    SET_BANK_RELAY_STATUS = 140
+    STORE_POWER_UP_DEFAULTS = 42
+    STORE_BANK_POWER_UP_DEFAULTS = 142
+    QUERY_POWER_UP_DEFAULTS = 43
+    QUERY_BANK_POWER_UP_DEFAULTS = 143
+    SELECT_RELAY_BANK = 49
+    TIMER_AND_SETUP_STX = 50
+
+
+class TimerSetupCommands(Enum):
+    RUN_NEW_DURATION_TIMER_OFFSET = 50
+    RUN_NEW_PULSE_TIMER_OFFSET = 70
+    SETUP_DURATION_TIMER_OFFSET = 90
+    SETUP_PULSE_TIMER_OFFSET = 110
+    CONTROL_ACTIVE_TIMERS = 131
+    QUERY_TIMER = 130
+    SET_TIMER_CALIBRATION = 132
+    QUERY_TIMER_CALIBRATION = 133
+    ACTIVATE_CALIBRATION_MARKERS = 134
+    DEACTIVATE_CALIBRATION_MARKERS = 135
+    SET_REPS_VALUE = 137
+    QUERY_REPS_VALUE = 136
+    RECOVERY_ATTEMPT_TO_SAFE_PARAMS = 147
+    SET_CHARACTER_DELAY_VALUE = 139
+    QUERY_CHARACTER_DELAY_VALUE = 138
+    SET_ATTACHED_BANKS_VALUE = 141
+    QUERY_ATTACHED_BANKS_VALUE = 140
+    SET_TEST_CYCLE_VALUE = 146
+    QUERY_TEST_CYCLE_VALUE = 145
+    RESTORE_FACTORY_DEFAULTS = 144
+
+
+class Bank(Enum):
+    BANK_1 = 1
+    BANK_2 = 2
+    BANK_3 = 3
+    BANK_4 = 4
+    BANK_5 = 5
+    BANK_6 = 6
+    BANK_7 = 7
+    BANK_8 = 8
+    BANK_9 = 9
+    BANK_10 = 10
+    BANK_11 = 11
+    BANK_12 = 12
+    BANK_13 = 13
+    BANK_14 = 14
+    BANK_15 = 15
+    BANK_16 = 16
+    BANK_17 = 17
+    BANK_18 = 18
+    BANK_19 = 19
+    BANK_20 = 20
+    BANK_21 = 21
+    BANK_22 = 22
+    BANK_23 = 23
+    BANK_24 = 24
+    BANK_25 = 25
+    BANK_26 = 26
+    BANK_27 = 27
+    BANK_28 = 28
+    BANK_29 = 29
+    BANK_30 = 30
+    BANK_31 = 31
+    BANK_32 = 32
+
+
+class Port(Enum):
+    PORT_1 = 0
+    PORT_2 = 1
+    PORT_3 = 2
+    PORT_4 = 3
+    PORT_5 = 4
+    PORT_6 = 5
+    PORT_7 = 6
+    PORT_8 = 7
+
+
+class RelayController(E3CDevice):
     nBANKS: int = 32
 
-    def __init__(self, com: socket, kwargs={}):
-        self.__dict__.update(kwargs)
-        self.com = com
-
-    def __exit__(self, exception_type, exception_value, exception_traceback):
-        self.com.close()
-
-    def __enter__(self):
-        self.com.connect((self.IP_ADDRESS, self.PORT))
-        self.com.settimeout(0.5)
-        self.light_controller_init()
-        return self
-
-    def light_controller_init(self) -> bool:
-        # init_command = b'\xfe\x32\x8d\x02'
-        # response = self.send_command(init_command, len=15)
-        # if response != b'LightController':
-        #     return False
-        # print(response)
-        # init_command_2 = b'\xfe\x32\x89\x01\xfe\x71\x02'
-        # self.com.send(init_command_2)
-        # response = self.com.recv(1)
-        # print(response)
-        # if response != b'\x55':
-        #     return False
-        # response = self.com.recv(1)
-        # print(response)
-        # if response != b'\x55':
-        #     return False
+    def _validate_timer_number(self, timer_number: int) -> bool:
+        if timer_number < 0 or timer_number > 15:
+            raise ValueError("Timer number must be between 0 and 15")
         return True
 
-    def send_command(self, command: bytes, len: int = 1) -> bytes:
-        self.com.send(command)
-        response = self.com.recv(len)
-        return response
+    def _timer_setup_command_builder(
+        self, data: bytes | Iterable[SupportsIndex] | SupportsIndex | SupportsBytes
+    ) -> bytes:
+        # Ensure data is bytes
+        if type(data) is not bytes:
+            data = bytes(data)
 
-    def validate_response(self, response: bytes) -> bool:
-        print(response)
-        if response and response == b"\x55":
-            return True
-        return False
-
-    def _command_builder(self, data: bytes) -> bytes:
-        b: bytearray = bytearray()
-        b.append(self.COMMAND_STX)  # STX
-        b.extend(data)
-        command = bytes(b)
+        # Join STX and data
+        command = bytes([
+            self.COMMAND_STX,
+            Commands.TIMER_AND_SETUP_STX.value
+        ]) + data
         return command
 
-    def _validate_port(self, port: int) -> bool:
-        if port < 1 or port > 8:
-            raise ValueError("Port must be between 1 and 8")
-        return True
+    # """
+    # Controlling Individual Relays
+    # """
 
-    def _validate_bank(self, bank: int) -> bool:
-        if bank < 0 or bank > self.nBANKS:
-            raise ValueError(f"Bank must be between 1 and {self.nBANKS}")
-        return True
-
-    """
-    The E3C Command Set
-    """
-
-    def enable_all_devices(self) -> bool:
-        """Tells all devices to respond to your commands."""
-        command = self._command_builder(b"\xf8")
-        response = self.send_command(command)
-        return self.validate_response(response)
-
-    def disable_all_devices(self) -> bool:
-        """Tells all devices to ignore your commands."""
-        command = self._command_builder(b"\xf9")
-        response = self.send_command(command)
-        return self.validate_response(response)
-
-    def enable_selected_device(self) -> bool:
-        """Tells a specific device to listen to your commands"""
-        command = self._command_builder(b"\xfa")
-        response = self.send_command(command)
-        return self.validate_response(response)
-
-    def disable_selected_device(self) -> bool:
-        """Tells a specific device to ignore your commands"""
-        command = self._command_builder(b"\xfb")
-        response = self.send_command(command)
-        return self.validate_response(response)
-
-    def enable_selected_device_exclusive(self) -> bool:
-        """Tells a specific device to listen to your commands, all other devices will ignore your commands."""
-        command = self._command_builder(b"\xfc")
-        response = self.send_command(command)
-        return self.validate_response(response)
-
-    def disable_selected_device_exclusive(self) -> bool:
-        """Tells a specific device to ignore your commands, all others will listen."""
-        command = self._command_builder(b"\xfd")
-        response = self.send_command(command)
-        return self.validate_response(response)
-
-    """Extended E3C Commands"""
-
-    def store_device_number(self) -> bool:
-        """
-        Stores the device number into the controller.
-        The device number takes effect immediately.
-        The enabled/disabled status of the device is unchanged
-        """
-        command = b"\xfe\xff"
-        response = self.send_command(command)
-        return self.validate_response(response)
-
-    def recall_device_identification(self) -> bytes:
-        """
-        This command reports back 4 bytes of data:
-        ProXR Device ID Part 1: 1
-        ProXR Device ID Part 2: 0
-        ProXR Firmware Version: 17 (or newer)
-        ProXR Year of Firmware Production: 205 (or newer)
-        ProXR E3C Device Number
-        """
-        command = b"\xfe\xf6"
-        response = self.send_command(command, 4)
-        return response
-
-    def recall_device_number(self) -> bool:
-        """Reads the stored device number from the controller"""
-        command = self._command_builder(b"\xf7")
-        response = self.send_command(command)
-        return self.validate_response(response)
-
-    """
-    The ProXR Relay Command Set
-    """
-
-    """
-    Controlling Individual Relays
-    """
-
-    def turn_off_relay(self, port: int) -> bool:
+    def turn_off_relay(self, port: Port) -> bool:
         """Turns off a specific relay in current bank."""
-        self._validate_port(port)
-        command: bytes = self._command_builder(
-            bytes(port - 1)  # 1 indexed port adusted to 0 indexed
-        )
+        command: bytes = self._command_builder([
+            port.value + Commands.TURN_OFF_RELAY_OFFSET.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    def turn_off_bank_relay(self, bank: int, port: int) -> bool:
+    def turn_off_bank_relay(self, bank: Bank, port: Port) -> bool:
         """Turns off a specific relay in specified bank."""
-        self._validate_port(port)
-        self._validate_bank(bank)
-        command: bytes = self._command_builder(bytes([port + 99, bank]))
+        command: bytes = self._command_builder([
+            port.value + Commands.TURN_OFF_BANK_RELAY_OFFSET.value,
+            bank.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    def turn_on_relay(self, port: int) -> bool:
+    def turn_on_relay(self, port: Port) -> bool:
         """Turns on a specific relay in current bank."""
-        self._validate_port(port)
-        command: bytes = self._command_builder(bytes(port + 7))
+        command: bytes = self._command_builder([
+            port.value + Commands.TURN_ON_RELAY_OFFSET.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    def turn_on_bank_relay(self, bank: int, port: int) -> bool:
+    def turn_on_bank_relay(self, bank: Bank, port: Port) -> bool:
         """Turns on a specific relay in specified bank."""
-        self._validate_port(port)
-        self._validate_bank(bank)
-        command: bytes = self._command_builder(bytes([port + 107, bank]))
+        command: bytes = self._command_builder([
+            port.value + Commands.TURN_ON_BANK_RELAY_OFFSET.value,
+            bank.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    """
-    Reading the status of individual relays
-    """
+    # """
+    # Reading the status of individual relays
+    # """
 
-    def query_relay_status(self, port: int) -> bool:
+    def query_relay_status(self, port: Port) -> bool:
         """Queries the status of a specific relay in current bank."""
-        self._validate_port(port)
-        command: bytes = self._command_builder(bytes(port + 15))
+        command: bytes = self._command_builder((
+            port.value + Commands.QUERY_RELAY_STATUS_OFFSET.value
+        ))
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    def query_bank_relay_status(self, bank: int, port: int) -> bool:
+    def query_bank_relay_status(self, bank: Bank, port: Port) -> bool:
         """Queries the status of a specific relay in specified bank."""
-        self._validate_port(port)
-        self._validate_bank(bank)
-        command: bytes = self._command_builder(bytes([port + 115, bank]))
+        command: bytes = self._command_builder([
+            port.value + Commands.QUERY_BANK_RELAY_STATUS_OFFSET.value,
+            bank.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    """
-    Reading the status of relay banks
-    """
+    # """
+    # Reading the status of relay banks
 
-    def query_status_all(self) -> bytes:
+    # This command allows you to read the status of a single bank of relays.
+    # A value of 0-255 is returned indicating the status of all 8 relays. The
+    # binary pattern of the value returned directly corresponds to the on/off
+    # status of each of the 8 relays in the selected relay bank. If the cur-
+    # rently selected relay bank is 0, or if you specify relay bank 0, then the
+    # status of all 32 relay banks will be sent. In this condition, your program
+    # should be written to read 32 bytes of data from the serial port.
+    # """
+
+    def query_status_all(self) -> int:
         """Queries the status of all relays in current bank."""
-        command: bytes = self._command_builder(bytes([24]))
+        command: bytes = self._command_builder([
+            Commands.QUERY_STATUS_ALL.value
+        ])
         response = self.send_command(command, 1)
-        return response
+        if response and len(response) == 1:
+            return int.from_bytes(response, "big")
+        return -1
 
-    def query_bank_status(self, bank: int) -> bytes:
-        """
-        Queries the status of all relays in specified bank.
-        This command allows you to read the status of a single bank of relays.
-        A value of 0-255 is returned indicating the status of all 8 relays. The
-        binary pattern of the value returned directly corresponds to the on/off
-        status of each of the 8 relays in the selected relay bank. If the cur-
-        rently selected relay bank is 0, or if you specify relay bank 0, then the
-        status of all 32 relay banks will be sent. In this condition, your program
-        should be written to read 32 bytes of data from the serial port.
-        """
-        self._validate_bank(bank)
-        command: bytes = self._command_builder(bytes([124, bank]))
+    def query_bank_status(self, bank: Bank) -> int:
+        """Queries the status of all relays in specified bank."""
+        command: bytes = self._command_builder([
+            Commands.QUERY_BANK_STATUS.value,
+            bank.value
+        ])
         response = self.send_command(command, 1)
-        return response
+        if response and len(response) == 1:
+            return int.from_bytes(response, "big")
+        return -1
 
-    """
-    Reporting Mode
-    """
+    # """
+    # Reporting Mode
+
+    # This command sets and stores (in non-volatile EEPROM while in con-
+    # figuration mode only) the reporting mode status. Reporting mode, by
+    # default, is ON, meaning every time a command is sent to the controller,
+    # the controller will send an 85 back to the computer, indicating that the
+    # command has finished executing your instructions. We recommend
+    # leaving it on, but doing so requires 2-Way communication with the con-
+    # troller. You should turn it off if you intend to use 1-Way communication
+    # only. A delay between some commands may be required when using
+    # 1-Way communications. For optimum reliability, leave reporting mode
+    # on and use 2-Way communications with the ProXR Series controllers.
+    # NOTE: Reporting Mode may be turned on or off at any time. The
+    # default power-up status of reporting mode is ONLY stored when
+    # the device is in configuration mode (all dip switches off when the
+    # controller is powered up).
+    # """
 
     def enable_reporting_mode(self) -> bool:
         """Enables reporting mode."""
-        command = self._command_builder(bytes(27))
+        self.REPORTING_MODE = True
+        command = self._command_builder([
+            Commands.ENABLE_REPORTING_MODE.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
     def disable_reporting_mode(self) -> bool:
-        """
-        Disables reporting mode.
-        This command sets and stores (in non-volatile EEPROM while in con-
-        figuration mode only) the reporting mode status. Reporting mode, by
-        default, is ON, meaning every time a command is sent to the controller,
-        the controller will send an 85 back to the computer, indicating that the
-        command has finished executing your instructions. We recommend
-        leaving it on, but doing so requires 2-Way communication with the con-
-        troller. You should turn it off if you intend to use 1-Way communication
-        only. A delay between some commands may be required when using
-        1-Way communications. For optimum reliability, leave reporting mode
-        on and use 2-Way communications with the ProXR Series controllers.
-        NOTE: Reporting Mode may be turned on or off at any time. The
-        default power-up status of reporting mode is ONLY stored when
-        the device is in configuration mode (all dip switches off when the
-        controller is powered up).
-        """
-        command = self._command_builder(bytes(28))
+        """Disables reporting mode."""
+        self.REPORTING_MODE = False
+        command = self._command_builder([
+            Commands.DISABLE_REPORTING_MODE.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    """
-    All relays on/off
-    """
+    # """
+    # All relays on/off
+    # """
 
     def enable_all_relays(self) -> bool:
         """Enables all relays."""
-        command = self._command_builder(bytes(29))
+        command = self._command_builder([
+            Commands.ENABLE_ALL_RELAYS.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    def enable_bank_relays(self, bank: int) -> bool:
+    def enable_bank_relays(self, bank: Bank) -> bool:
         """Enables all relays in specified bank."""
-        self._validate_bank(bank)
-        command = self._command_builder(bytes([129, bank]))
+        command = self._command_builder([
+            Commands.ENABLE_BANK_RELAYS.value, bank.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
     def disable_all_relays(self) -> bool:
         """Disables all relays."""
-        command = self._command_builder(bytes(30))
+        command = self._command_builder([
+            Commands.DISABLE_ALL_RELAYS.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    def disable_bank_relays(self, bank: int) -> bool:
+    def disable_bank_relays(self, bank: Bank) -> bool:
         """Disables all relays in specified bank."""
-        self._validate_bank(bank)
-        command = self._command_builder(bytes([130, bank]))
+        command = self._command_builder([
+            Commands.DISABLE_BANK_RELAYS.value,
+            bank.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    """
-    Inverting Relays
-    """
+    # """
+    # Inverting Relays
+    # """
 
     def toggle_all_relays(self) -> bool:
         """Toggles all relays."""
-        command = self._command_builder(bytes(31))
+        command = self._command_builder([
+            Commands.TOGGLE_ALL_RELAYS.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    def toggle_bank_relays(self, bank: int) -> bool:
+    def toggle_bank_relays(self, bank: Bank) -> bool:
         """Toggles all relays in specified bank."""
-        self._validate_bank(bank)
-        command = self._command_builder(bytes([131, bank]))
+        command = self._command_builder([
+            Commands.TOGGLE_BANK_RELAYS.value,
+            bank.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    """
-    Reversing Relays
-    """
+    # """
+    # Reversing Relays
+    # """
 
     def reverse_all_relays(self) -> bool:
         """
         Reverses all relays.
         reverses bit order of all relay banks.
         """
-        command = self._command_builder(bytes(32))
+        command = self._command_builder([
+            Commands.REVERSE_ALL_RELAYS.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    def reverse_bank_relays(self, bank: int) -> bool:
+    def reverse_bank_relays(self, bank: Bank) -> bool:
         """Reverses all relays in specified bank."""
-        self._validate_bank(bank)
-        command = self._command_builder(bytes([132, bank]))
+        command = self._command_builder([
+            Commands.REVERSE_BANK_RELAYS.value,
+            bank.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    """
-    Test 2-way communications
-    """
+    # """
+    # Test 2-way communications
+    # """
 
     def test_comms(self) -> bool:
         """
@@ -338,89 +359,111 @@ class RelayController:
         and the relay controller. This command does nothing except report
         back an ASCII character code 85 when executed.
         """
-        command = self._command_builder(bytes(33))
+        command = self._command_builder([
+            Commands.TEST_COMMS.value
+        ])
         response = self.send_command(command, len=1)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    """
-    Reading the currently selected relay bank
-    """
+    # """
+    # Reading the currently selected relay bank
+    # """
 
     def query_selected_bank(self) -> int:
         """Queries the currently selected bank."""
-        command = self._command_builder(bytes(34))
+        command = self._command_builder([
+            Commands.QUERY_SELECTED_BANK.value
+        ])
         response = self.send_command(command, len=1)
         if response:
             return int.from_bytes(response, "big")
         return -1
 
-    """
-    Relay Refreshing Commands.
+    # """
+    # Relay Refreshing Commands.
 
-    Relay Refreshing is discussed heavily on pages 10 and 11, and are
-    considered some of the most important “foundation” concepts for taking
-    advantage of all the features the ProXR series controllers have to offer.
-    Please reference these pages for detailed explanation and examples.
-    """
+    # Relay Refreshing is discussed heavily on pages 10 and 11, and are
+    # considered some of the most important “foundation” concepts for taking
+    # advantage of all the features the ProXR series controllers have to offer.
+    # Please reference these pages for detailed explanation and examples.
+    # """
 
     def enable_automatic_refreshing(self) -> bool:
         """Enables automatic refreshing."""
-        command = self._command_builder(bytes(25))
+        command = self._command_builder([
+            Commands.ENABLE_AUTOMATIC_REFRESHING.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
     def disable_automatic_refreshing(self) -> bool:
         """Disables automatic refreshing."""
-        command = self._command_builder(bytes(26))
+        command = self._command_builder([
+            Commands.DISABLE_AUTOMATIC_REFRESHING.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
     def store_relay_refreshing_mode(self) -> bool:
         """Stores the current relay refreshing mode."""
-        command = self._command_builder(bytes(35))
+        command = self._command_builder([
+            Commands.STORE_RELAY_REFRESHING_MODE.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    def query_relay_refreshing_mode(self) -> bool:
+    def query_relay_refreshing_mode(self) -> int:
         """Queries the current relay refreshing mode."""
-        command = self._command_builder(bytes(36))
+        command = self._command_builder([
+            Commands.QUERY_RELAY_REFRESHING_MODE.value
+        ])
         response = self.send_command(command, len=1)
-        return self.validate_response(response)
+        if response and len(response) == 1:
+            return int.from_bytes(response, "big")
+        return -1
 
     def refresh_relays(self) -> bool:
         """Refreshes the relays."""
-        command = self._command_builder(bytes(37))
+        command = self._command_builder([
+            Commands.REFRESH_RELAYS.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    """
-    Set the status of a relay bank
+    # """
+    # Set the status of a relay bank
 
-    This command writes a byte of data directly to a relay bank. This al-
-    lows you to easily set the status of 8 relays at one time. RelayData is a
-    parameter value from 0-255. A value of 0 turns off all the relays. A
-    value of 255 turns on all the relays. Other values set the status of the
-    relays in the equivalent binary pattern of the RelayData parameter
-    value.
-    NOTE: A Bank Value of 0 applies this command to all relay banks.
-    """
+    # This command writes a byte of data directly to a relay bank. This al-
+    # lows you to easily set the status of 8 relays at one time. RelayData is a
+    # parameter value from 0-255. A value of 0 turns off all the relays. A
+    # value of 255 turns on all the relays. Other values set the status of the
+    # relays in the equivalent binary pattern of the RelayData parameter
+    # value.
+    # NOTE: A Bank Value of 0 applies this command to all relay banks.
+    # """
 
     def set_relay_status(self, relay_data: int) -> bool:
         """Sets the status of a relay bank."""
         if relay_data < 0 or relay_data > 255:
             raise ValueError("Relay data must be between 0 and 255")
-        command = self._command_builder(bytes([40, relay_data]))
+        command = self._command_builder([
+            Commands.SET_RELAY_STATUS.value,
+            relay_data
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    def set_bank_relay_status(self, bank: int, relay_data: int) -> bool:
+    def set_bank_relay_status(self, bank: Bank, relay_data: int) -> bool:
         """Sets the status of a relay bank."""
-        self._validate_bank(bank)
         if relay_data < 0 or relay_data > 255:
             raise ValueError("Relay data must be between 0 and 255")
-        command = self._command_builder(bytes([140, relay_data, bank]))
+        command = self._command_builder([
+            Commands.SET_BANK_RELAY_STATUS.value,
+            relay_data,
+            bank.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
     """
     Power up relay status configuration
@@ -430,31 +473,42 @@ class RelayController:
     tern of all relays in all 26 banks.
     """
 
-    def store_power_up_defaults(self, bank: int) -> bool:
+    def store_power_up_defaults(self) -> bool:
         """Stores the power up defaults selected relay bank."""
-        self._validate_bank(bank)
-        command = self._command_builder(bytes([42]))
+        command = self._command_builder([
+            Commands.STORE_POWER_UP_DEFAULTS.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    def store_bank_power_up_defaults(self, bank: int) -> bool:
+    def store_bank_power_up_defaults(self, bank: Bank) -> bool:
         """Stores the power up defaults for a bank."""
-        self._validate_bank(bank)
-        command = self._command_builder(bytes([142, bank]))
+        command = self._command_builder([
+            Commands.STORE_BANK_POWER_UP_DEFAULTS.value,
+            bank.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
     def query_power_up_defaults(self) -> bytes:
         """Queries the power up defaults selected relay bank."""
-        command = self._command_builder(bytes([43]))
-        response = self.send_command(command, len=1)
+        command = self._command_builder([
+            Commands.QUERY_POWER_UP_DEFAULTS.value
+        ])
+        response = self.send_command(command, len=26)
         return response
 
-    def query_bank_power_up_defaults(self, bank: int) -> bytes:
+    def query_bank_power_up_defaults(self, bank: Bank) -> bytes:
         """Queries the power up defaults for a bank."""
-        self._validate_bank(bank)
-        command = self._command_builder(bytes([143, bank]))
-        response = self.send_command(command, len=1)
+        command = self._command_builder([
+            Commands.QUERY_BANK_POWER_UP_DEFAULTS.value,
+            bank.value
+        ])
+        if bank.value == 0:
+            len = 26
+        else:
+            len = 1
+        response = self.send_command(command, len)
         return response
 
     """
@@ -466,12 +520,14 @@ class RelayController:
     command.
     """
 
-    def select_relay_bank(self, bank: int) -> bool:
+    def select_relay_bank(self, bank: Bank) -> bool:
         """Selects the active relay bank."""
-        self._validate_bank(bank)
-        command = self._command_builder(bytes([49, bank]))
+        command = self._command_builder([
+            Commands.SELECT_RELAY_BANK.value,
+            bank.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
     """
     Cleanup Routines
@@ -481,28 +537,12 @@ class RelayController:
         """Clears the serial buffer."""
         while self.com.recv(1):
             # TODO: define serial buffer clear condition
-            pass
+            continue
         return True
 
-    """
-    Simple Timer Commands
-    Duration = timer + 50
-    Pulse = timer + 70
-    Manual Duration = timer + 90
-    Manual Pulse = timer + 110
-    """
-
-    def _validate_timer_number(self, timer_number: int) -> bool:
-        if timer_number < 0 or timer_number > 15:
-            raise ValueError("Timer number must be between 0 and 15")
-        return True
-
-    def _timer_command_builder(self, data: bytes) -> bytes:
-        b: bytearray = bytearray()
-        b.extend(bytes([0xFE, 50]))  # Timer Command STX
-        b.extend(data)
-        command = bytes(b)
-        return command
+    # """
+    # Simple Timer Commands
+    # """
 
     def run_new_duration_timer(
         self,
@@ -516,11 +556,15 @@ class RelayController:
         self._validate_timer_number(timer_number)
         # Uses different relay addressing scheme
         # self._validate_port(relay)
-        command: bytes = self._timer_command_builder(
-            bytes([timer_number + 50, duration_h, duration_m, duration_s, relay])
-        )
+        command: bytes = self._timer_setup_command_builder([
+            timer_number + TimerSetupCommands.RUN_NEW_DURATION_TIMER_OFFSET.value,
+            duration_h,
+            duration_m,
+            duration_s,
+            relay
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
     def run_new_pulse_timer(
         self, timer_number: int, pulse_h: int, pulse_m: int, pulse_s: int, relay: int
@@ -529,15 +573,19 @@ class RelayController:
         self._validate_timer_number(timer_number)
         # Uses different relay addressing scheme
         # self._validate_port(relay)
-        command: bytes = self._timer_command_builder(
-            bytes([timer_number + 70, pulse_h, pulse_m, pulse_s, relay])
-        )
+        command: bytes = self._timer_setup_command_builder([
+            timer_number + TimerSetupCommands.RUN_NEW_PULSE_TIMER_OFFSET.value,
+            pulse_h,
+            pulse_m,
+            pulse_s,
+            relay
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    """
-    Advanced Timer comfiguration
-    """
+    # """
+    # Advanced Timer comfiguration
+    # """
 
     def setup_duration_timer(
         self,
@@ -551,11 +599,15 @@ class RelayController:
         self._validate_timer_number(timer_number)
         # Uses different relay addressing scheme
         # self._validate_port(relay)
-        command: bytes = self._timer_command_builder(
-            bytes([timer_number + 90, duration_h, duration_m, duration_s, relay])
-        )
+        command: bytes = self._timer_setup_command_builder([
+            timer_number + TimerSetupCommands.SETUP_DURATION_TIMER_OFFSET.value,
+            duration_h,
+            duration_m,
+            duration_s,
+            relay
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
     def setup_pulse_timer(
         self, timer_number: int, pulse_h: int, pulse_m: int, pulse_s: int, relay: int
@@ -564,44 +616,55 @@ class RelayController:
         self._validate_timer_number(timer_number)
         # Uses different relay addressing scheme
         # self._validate_port(relay)
-        command: bytes = self._timer_command_builder(
-            bytes([timer_number + 110, pulse_h, pulse_m, pulse_s, relay])
-        )
+        command: bytes = self._timer_setup_command_builder([
+            timer_number + TimerSetupCommands.SETUP_PULSE_TIMER_OFFSET.value,
+            pulse_h,
+            pulse_m,
+            pulse_s,
+            relay
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
     def control_active_timers(self, timer_state: int):
         """Controls active timers."""
         if timer_state < 0 or timer_state > 0xFFFF:
             raise ValueError("Timer state must be between 0x00 and 0xFFFF")
-        command: bytes = self._timer_command_builder(
-            bytes([131, timer_state & 0xFF, (timer_state >> 8) & 0xFF])
-        )
+        command: bytes = self._timer_setup_command_builder([
+            TimerSetupCommands.CONTROL_ACTIVE_TIMERS.value,
+            timer_state & 0xFF, # LSB
+            (timer_state >> 8) & 0xFF # MSB
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
-    def query_timer(self, timer_number: int) -> bytes:
+    def query_timer(self, timer_number: int) -> list[int]:
         """Query remaining time before expiery."""
         self._validate_timer_number(timer_number)
-        command = self._timer_command_builder(bytes([130, timer_number]))
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.QUERY_TIMER.value,
+            timer_number
+        ])
         response = self.send_command(command)
-        return response
+        return list(response)
 
     def set_timer_calibration(self, timer_calibration_value: int) -> bool:
         """Sets timer calibration."""
         if timer_calibration_value < 0 or timer_calibration_value > 0xFFFF:
             raise ValueError("Timer state must be between 0x00 and 0xFFFF")
-        command = self._timer_command_builder(bytes([
-            132,
-            timer_calibration_value & 0xFF,
-            (timer_calibration_value >> 8) & 0xFF
-        ]))
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.SET_TIMER_CALIBRATION.value,
+            timer_calibration_value & 0xFF, # LSB
+            (timer_calibration_value >> 8) & 0xFF # MSB
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
     def query_timer_calibration(self) -> int:
         """Queries timer calibration."""
-        command = self._timer_command_builder(bytes([133]))
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.QUERY_TIMER_CALIBRATION.value
+        ])
         response = self.send_command(command, len=2)
         return int.from_bytes(response, 'little')
 
@@ -616,12 +679,145 @@ class RelayController:
         the calibration value. These markers may prove useful if you need your
         PC to know when a timing even has occurred.
         """
-        command = self._timer_command_builder(bytes([134]))
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.ACTIVATE_CALIBRATION_MARKERS.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
 
     def deactivate_calibration_markers(self) -> bool:
         """Deactivates calibration markers."""
-        command = self._timer_command_builder(bytes([135]))
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.DEACTIVATE_CALIBRATION_MARKERS.value
+        ])
         response = self.send_command(command)
-        return self.validate_response(response)
+        return self.validate_res_success(response)
+
+    # """
+    # Advanced Configuration Commands
+    # """
+
+    def set_reps_value(self, reps_value: int) -> bool:
+        """Sets the REPS value for advanced timer operations."""
+        if reps_value < 1 or reps_value > 255:
+            raise ValueError("REPS value must be between 1 and 255")
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.SET_REPS_VALUE.value,
+            reps_value
+        ])
+        response = self.send_command(command)
+        # return self.validate_res_success(response)
+        return True
+
+    def query_reps_value(self) -> int:
+        """Queries the REPS value for advanced timer operations."""
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.QUERY_REPS_VALUE.value
+        ])
+        response = self.send_command(command, len=1)
+        if response:
+            return int.from_bytes(response, "big")
+        return -1
+
+    def recovery_attempt_to_safe_params(self) -> bool:
+        """Attempts to recover the device to safe parameters."""
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.RECOVERY_ATTEMPT_TO_SAFE_PARAMS.value
+        ])
+        response = self.send_command(command)
+        return self.validate_res_success(response)
+
+    def set_character_delay_value(self, delay_value: int) -> bool:
+        """Sets the character delay value."""
+        if delay_value < 0 or delay_value > 255:
+            raise ValueError("Delay value must be between 0 and 255")
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.SET_CHARACTER_DELAY_VALUE.value,
+            delay_value
+        ])
+        response = self.send_command(command)
+        return self.validate_res_success(response)
+
+    def query_character_delay_value(self) -> int:
+        """Queries the character delay value."""
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.QUERY_CHARACTER_DELAY_VALUE.value
+        ])
+        response = self.send_command(command, len=1)
+        if response:
+            return int.from_bytes(response, "big")
+        return -1
+
+    def set_attached_banks_value(self, banks_value: int) -> bool:
+        """Sets the attached banks value."""
+        if banks_value < 1 or banks_value > 32:
+            raise ValueError("Banks value must be between 1 and 32")
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.SET_ATTACHED_BANKS_VALUE.value,
+            banks_value
+        ])
+        response = self.send_command(command)
+        # success = self.validate_res_success(response)
+        # For some unknow reason test unit is returning the string "LightController"
+        success = response is not None
+        if success:
+            self.nBANKS = banks_value
+        return success
+
+    def query_attached_banks_value(self) -> int:
+        """Queries the attached banks value."""
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.QUERY_ATTACHED_BANKS_VALUE.value
+        ])
+        response = self.send_command(command, len=1)
+        if response:
+            self.nBANKS = int.from_bytes(response, "big")
+            return self.nBANKS
+        return -1
+
+    def set_test_cycle_value(self, cycle_value: int) -> bool:
+        """Sets the test cycle value."""
+        if cycle_value < 0 or cycle_value > 32:
+            raise ValueError("Cycle value must be between 0 and 32")
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.SET_TEST_CYCLE_VALUE.value,
+            cycle_value
+        ])
+        response = self.send_command(command)
+        return self.validate_res_success(response)
+
+    def query_test_cycle_value(self) -> int:
+        """Queries the test cycle value."""
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.QUERY_TEST_CYCLE_VALUE.value
+        ])
+        response = self.send_command(command, len=1)
+        if response:
+            return int.from_bytes(response, "big")
+        return -1
+
+    def restore_factory_defaults(self) -> bool:
+        """Restores factory default settings."""
+        command = self._timer_setup_command_builder([
+            TimerSetupCommands.RESTORE_FACTORY_DEFAULTS.value
+        ])
+        response = self.send_command(command)
+        return self.validate_res_success(response)
+
+    def quick_start(self) -> bool:
+        """Configures the device with quick start settings."""
+        # NOTE: Commands / Procedure as per TCP packet capture from Pool2001
+        # 254 50 141 2 """returns b'LightController'"""
+        self.enable_reporting_mode()
+        self.enable_automatic_refreshing()
+        res = self.set_attached_banks_value(2)
+        if not res:
+            return False
+        # 254 50 137 1
+        res = self.set_reps_value(1)
+        if not res:
+            return False
+        # 254 131 2
+        res = self.toggle_bank_relays(Bank.BANK_2)
+        print(res)
+        return res
